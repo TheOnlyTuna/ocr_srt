@@ -4,6 +4,10 @@ Tool OCR chuyên nghiệp với các tính năng tiền xử lý ảnh nâng cao
 
 ## Tính năng
 
+- 🆕 **Capture màn hình + bounding box tuỳ chọn**: Capture trực tiếp từ màn hình (bao gồm fullscreen), vẽ bounding box cho từng vùng cần đọc, lưu kết quả OCR và toạ độ vào file JSON.
+- 🔴 **Preview realtime không cần bấm**: Màn hình được cập nhật liên tục theo chu kỳ, luôn hiển thị frame mới nhất để vẽ box và chạy OCR.
+- 🔁 **OCR liên tục + realtime JSON**: Hẹn giờ OCR tự động trên bounding box đã chọn, luôn ghi đè `outputs/latest_result.json` để các web view (HTML/PHP) đọc realtime.
+
 ### Tự động phát hiện và điều chỉnh (Mới!)
 - ✅ **Tự động phân tích ảnh**: Phát hiện kích thước, chất lượng, blur, độ tương phản
 - ✅ **Tự động điều chỉnh tham số OCR**: canvas_size, mag_ratio, thresholds dựa trên kích thước ảnh
@@ -24,13 +28,10 @@ Tool OCR chuyên nghiệp với các tính năng tiền xử lý ảnh nâng cao
 ## Cài đặt
 
 ```bash
-pip install opencv-python numpy pillow easyocr
-```
-
-Hoặc sử dụng requirements.txt:
-```bash
 pip install -r requirements.txt
 ```
+
+Hoặc cài thủ công các gói chính: `easyocr`, `opencv-python-headless`, `mss`, `Pillow`, `numpy`.
 
 ## Sử dụng
 
@@ -41,6 +42,30 @@ Khởi chạy giao diện đồ họa:
 ```bash
 python ocr_gui.py
 ```
+
+**Luồng chính (capture + OCR):**
+1. Nhập `Monitor index` (màn hình cần capture, mặc định 1); preview sẽ tự cập nhật frame mới nhất. Có thể bấm **Capture screen** nếu muốn chụp thủ công.
+2. Trên preview, kéo thả chuột để vẽ các bounding box cho vùng cần đọc.
+3. Chọn ngôn ngữ (ví dụ `en,vi`), bật/tắt GPU nếu cần.
+4. Nhấn **Run OCR** → EasyOCR chạy trên từng bounding box, lưu kết quả và toạ độ vào file JSON trong thư mục `outputs/`.
+
+**OCR liên tục (auto):**
+- Sau khi vẽ bounding box (preview đã tự lấy ảnh), nhập chu kỳ (ms) trong mục **Auto OCR**.
+- Nhấn **Bật OCR liên tục** để chạy lặp; ứng dụng sẽ tự capture màn hình, OCR và ghi đè `outputs/latest_result.json` sau mỗi chu kỳ (đồng thời lưu file có timestamp).
+- Nhấn lại nút để dừng.
+
+**Auto preview:**
+- Mặc định bật ngay khi mở GUI, tự capture và refresh preview theo chu kỳ.
+- Có thể chỉnh chu kỳ (ms) và bật/tắt ở mục **Auto preview**.
+
+Kết quả JSON bao gồm:
+- Thời gian capture, monitor index, kích thước ảnh gốc
+- Danh sách box: `bbox` (x1, y1, x2, y2), `text`, `confidence`
+
+**Xem realtime trên web:**
+- Chạy `python -m http.server 8000` trong thư mục dự án (hoặc dùng Apache/Nginx/PHP tùy ý).
+- Mở `http://localhost:8000/realtime_view.html` để xem JSON realtime (tự refresh mỗi giây).
+- Nếu dùng PHP, chép `realtime_view.php` vào webroot và truy cập; trang sẽ tự reload mỗi giây và hiển thị JSON.
 
 Hoặc:
 
