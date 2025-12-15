@@ -31,6 +31,10 @@ Tool OCR chuyên nghiệp với các tính năng tiền xử lý ảnh nâng cao
 pip install -r requirements.txt
 ```
 
+> Lưu ý: dự án dùng thêm thư viện `av` (PyAV) để nhận luồng SRT ổn định và giảm drop frame khi decode.
+
+Nếu gặp lỗi `ModuleNotFoundError` (ví dụ `mss` hoặc `av`), hãy chắc chắn đã cài đủ phụ thuộc bằng lệnh trên. Trên Windows bạn có thể cần "Desktop development with C++" (Visual Studio Build Tools) để biên dịch PyAV.
+
 Hoặc cài thủ công các gói chính: `easyocr`, `opencv-python-headless`, `mss`, `Pillow`, `numpy`.
 
 ## Sử dụng
@@ -44,7 +48,9 @@ python ocr_gui.py
 ```
 
 **Luồng chính (capture + OCR):**
-1. Nhập `Monitor index` (màn hình cần capture, mặc định 1); preview sẽ tự cập nhật frame mới nhất. Có thể bấm **Capture screen** nếu muốn chụp thủ công.
+1. Chọn nguồn capture:
+   - **Monitor**: nhập `Monitor index` (mặc định 1); preview sẽ tự cập nhật frame mới nhất hoặc bấm **Capture screen**.
+   - **SRT**: nhập URL dạng `srt://IP:PORT`, bấm **Kết nối SRT** để nhận khung hình realtime từ VLC/encoder SRT và preview tự cập nhật.
 2. Trên preview, kéo thả chuột để vẽ các bounding box cho vùng cần đọc.
 3. Chọn ngôn ngữ (ví dụ `en,vi`), bật/tắt GPU nếu cần.
 4. Nhấn **Run OCR** → EasyOCR chạy trên từng bounding box, lưu kết quả và toạ độ vào file JSON trong thư mục `outputs/`.
@@ -56,7 +62,7 @@ python ocr_gui.py
 
 **Auto preview:**
 - Mặc định bật ngay khi mở GUI, tự capture và refresh preview theo chu kỳ.
-- Có thể chỉnh chu kỳ (ms) và bật/tắt ở mục **Auto preview**.
+- Có thể chỉnh chu kỳ (ms) và bật/tắt ở mục **Auto preview**. Nguồn preview sẽ là Monitor hoặc SRT tùy lựa chọn hiện tại.
 
 Kết quả JSON bao gồm:
 - Thời gian capture, monitor index, kích thước ảnh gốc

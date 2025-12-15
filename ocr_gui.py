@@ -7,7 +7,7 @@ from tkinter import messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from capture_manager import CaptureManager
+from capture_manager import CaptureManager, SRTStreamCapture
 from ocr_pipeline import OCRProcessor
 
 OUTPUT_DIR = Path("outputs")
@@ -34,16 +34,19 @@ class OCRApp:
         self.root.title("EasyOCR Capture Pro")
         self.root.geometry("1200x800")
 
+        self.source_var = tk.StringVar(value="monitor")
         self.monitor_index = tk.IntVar(value=1)
         self.languages_var = tk.StringVar(value="en,vi")
         self.gpu_var = tk.BooleanVar(value=False)
         self.interval_ms_var = tk.IntVar(value=1500)
         self.preview_interval_ms = tk.IntVar(value=1000)
+        self.srt_url_var = tk.StringVar(value="srt://127.0.0.1:9000")
         self.auto_running = False
         self.auto_cycles = tk.IntVar(value=0)
         self.preview_running = False
 
         self.capture_manager = CaptureManager(monitor_index=self.monitor_index.get())
+        self.srt_capture: SRTStreamCapture | None = None
         self.image = None
         self.display_image = None
         self.photo = None
@@ -65,11 +68,22 @@ class OCRApp:
         control_frame.pack(side=tk.LEFT, fill=tk.Y)
 
         ttk.Label(control_frame, text="Capture Settings", font=("Arial", 12, "bold")).pack(anchor=tk.W)
+        source_row = ttk.Frame(control_frame)
+        source_row.pack(fill=tk.X, pady=2)
+        ttk.Radiobutton(source_row, text="Monitor", variable=self.source_var, value="monitor").pack(side=tk.LEFT)
+        ttk.Radiobutton(source_row, text="SRT", variable=self.source_var, value="srt").pack(side=tk.LEFT, padx=4)
+
         monitor_row = ttk.Frame(control_frame)
         monitor_row.pack(fill=tk.X, pady=5)
         ttk.Label(monitor_row, text="Monitor index:").pack(side=tk.LEFT)
         ttk.Entry(monitor_row, textvariable=self.monitor_index, width=5).pack(side=tk.LEFT, padx=5)
         ttk.Button(monitor_row, text="Refresh monitors", command=self._refresh_monitors).pack(side=tk.LEFT)
+
+        srt_row = ttk.Frame(control_frame)
+        srt_row.pack(fill=tk.X, pady=2)
+        ttk.Label(srt_row, text="SRT URL:").pack(side=tk.LEFT)
+        ttk.Entry(srt_row, textvariable=self.srt_url_var, width=26).pack(side=tk.LEFT, padx=4)
+        ttk.Button(control_frame, text="Kết nối SRT", command=self.connect_srt).pack(fill=tk.X, pady=4)
 
         ttk.Button(control_frame, text="Capture screen", command=self.capture_screen).pack(fill=tk.X, pady=5)
 
@@ -129,8 +143,7 @@ class OCRApp:
 
     def capture_screen(self) -> None:
         try:
-            self.capture_manager.monitor_index = self.monitor_index.get()
-            self.image = self.capture_manager.grab_frame()
+            self.image = self._grab_current_frame()
             self._display_image(self.image)
             self.status_var.set("Đã capture màn hình. Vẽ bounding box để đọc OCR.")
         except Exception as exc:
@@ -172,8 +185,7 @@ class OCRApp:
         if not self.preview_running:
             return
         try:
-            self.capture_manager.monitor_index = self.monitor_index.get()
-            live_image = self.capture_manager.grab_frame()
+            live_image = self._grab_current_frame()
             self.image = live_image
             self._display_image(live_image)
             self.status_var.set("Đang xem preview màn hình trực tiếp")
@@ -340,8 +352,7 @@ class OCRApp:
             return
 
         try:
-            self.capture_manager.monitor_index = self.monitor_index.get()
-            live_image = self.capture_manager.grab_frame()
+            live_image = self._grab_current_frame()
             self.image = live_image
             self._display_image(live_image)
             languages = [lang.strip() for lang in self.languages_var.get().split(",") if lang.strip()]
@@ -374,6 +385,31 @@ class OCRApp:
             listbox.insert(tk.END, str(box))
 
         ttk.Button(dialog, text="Đóng", command=dialog.destroy).pack(pady=5)
+
+    def _grab_current_frame(self) -> Image.Image:
+        if self.source_var.get() == "srt":
+            if not self.srt_capture or not self.srt_capture.running:
+                raise RuntimeError("Chưa kết nối SRT hoặc stream chưa sẵn sàng.")
+            frame = self.srt_capture.get_latest_frame()
+            if frame is None:
+                raise RuntimeError("Chưa nhận frame từ SRT. Hãy đợi vài giây hoặc kiểm tra URL.")
+            return frame
+
+        self.capture_manager.monitor_index = self.monitor_index.get()
+        return self.capture_manager.grab_frame()
+
+    def connect_srt(self) -> None:
+        url = self.srt_url_var.get().strip()
+        if not url:
+            messagebox.showwarning("SRT", "Hãy nhập URL SRT (ví dụ srt://127.0.0.1:9000)")
+            return
+
+        if self.srt_capture:
+            self.srt_capture.stop()
+        self.srt_capture = SRTStreamCapture(url)
+        self.srt_capture.start()
+        self.source_var.set("srt")
+        self.status_var.set("Đang kết nối tới SRT... chờ khung hình đầu tiên")
 
 
 def main() -> None:
