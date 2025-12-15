@@ -4,6 +4,8 @@ Tool OCR chuyên nghiệp với các tính năng tiền xử lý ảnh nâng cao
 
 ## Tính năng
 
+- 🆕 **Capture màn hình + bounding box tuỳ chọn**: Capture trực tiếp từ màn hình (bao gồm fullscreen), vẽ bounding box cho từng vùng cần đọc, lưu kết quả OCR và toạ độ vào file JSON.
+
 ### Tự động phát hiện và điều chỉnh (Mới!)
 - ✅ **Tự động phân tích ảnh**: Phát hiện kích thước, chất lượng, blur, độ tương phản
 - ✅ **Tự động điều chỉnh tham số OCR**: canvas_size, mag_ratio, thresholds dựa trên kích thước ảnh
@@ -24,13 +26,10 @@ Tool OCR chuyên nghiệp với các tính năng tiền xử lý ảnh nâng cao
 ## Cài đặt
 
 ```bash
-pip install opencv-python numpy pillow easyocr
-```
-
-Hoặc sử dụng requirements.txt:
-```bash
 pip install -r requirements.txt
 ```
+
+Hoặc cài thủ công các gói chính: `easyocr`, `opencv-python-headless`, `mss`, `Pillow`, `numpy`.
 
 ## Sử dụng
 
@@ -41,6 +40,16 @@ Khởi chạy giao diện đồ họa:
 ```bash
 python ocr_gui.py
 ```
+
+**Luồng chính (capture + OCR):**
+1. Nhập `Monitor index` (màn hình cần capture, mặc định 1) và bấm **Capture screen** để lấy ảnh từ ứng dụng video (hỗ trợ fullscreen).
+2. Trên preview, kéo thả chuột để vẽ các bounding box cho vùng cần đọc.
+3. Chọn ngôn ngữ (ví dụ `en,vi`), bật/tắt GPU nếu cần.
+4. Nhấn **Run OCR** → EasyOCR chạy trên từng bounding box, lưu kết quả và toạ độ vào file JSON trong thư mục `outputs/`.
+
+Kết quả JSON bao gồm:
+- Thời gian capture, monitor index, kích thước ảnh gốc
+- Danh sách box: `bbox` (x1, y1, x2, y2), `text`, `confidence`
 
 Hoặc:
 
