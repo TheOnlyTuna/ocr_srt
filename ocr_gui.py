@@ -38,8 +38,10 @@ class OCRApp:
         self.languages_var = tk.StringVar(value="en,vi")
         self.gpu_var = tk.BooleanVar(value=False)
         self.interval_ms_var = tk.IntVar(value=1500)
+        self.preview_interval_ms = tk.IntVar(value=1000)
         self.auto_running = False
         self.auto_cycles = tk.IntVar(value=0)
+        self.preview_running = False
 
         self.capture_manager = CaptureManager(monitor_index=self.monitor_index.get())
         self.image = None
@@ -56,6 +58,7 @@ class OCRApp:
         self.processor_config: Tuple[Tuple[str, ...], bool] = (tuple(), False)
 
         self._build_layout()
+        self._start_live_preview()
 
     def _build_layout(self) -> None:
         control_frame = ttk.Frame(self.root, padding=10)
@@ -86,6 +89,14 @@ class OCRApp:
         self.auto_button.pack(fill=tk.X, pady=4)
         ttk.Label(control_frame, text="Chu kỳ đã chạy:").pack(anchor=tk.W)
         ttk.Label(control_frame, textvariable=self.auto_cycles, foreground="#9b2226").pack(anchor=tk.W)
+
+        ttk.Label(control_frame, text="Auto preview", font=("Arial", 12, "bold")).pack(anchor=tk.W, pady=(10, 0))
+        preview_row = ttk.Frame(control_frame)
+        preview_row.pack(fill=tk.X, pady=2)
+        ttk.Label(preview_row, text="Interval (ms):").pack(side=tk.LEFT)
+        ttk.Entry(preview_row, textvariable=self.preview_interval_ms, width=8).pack(side=tk.LEFT, padx=5)
+        self.preview_button = ttk.Button(control_frame, text="Dừng cập nhật màn hình", command=self.toggle_preview)
+        self.preview_button.pack(fill=tk.X, pady=4)
 
         ttk.Label(control_frame, text="Bounding boxes", font=("Arial", 12, "bold")).pack(anchor=tk.W, pady=(10, 0))
         self.box_list = tk.Listbox(control_frame, height=10)
@@ -124,6 +135,53 @@ class OCRApp:
             self.status_var.set("Đã capture màn hình. Vẽ bounding box để đọc OCR.")
         except Exception as exc:
             messagebox.showerror("Capture failed", f"Không thể capture: {exc}")
+
+    def _start_live_preview(self) -> None:
+        if self.preview_running:
+            return
+        self.preview_running = True
+        if hasattr(self, "preview_button"):
+            self.preview_button.config(text="Dừng cập nhật màn hình")
+        self.status_var.set("Đang cập nhật màn hình tự động")
+        self._preview_job = self.root.after(200, self._run_live_preview)
+
+    def toggle_preview(self) -> None:
+        if self.preview_running:
+            self.preview_running = False
+            if hasattr(self, "_preview_job"):
+                self.root.after_cancel(self._preview_job)
+            self.status_var.set("Đã dừng cập nhật màn hình tự động")
+            if hasattr(self, "preview_button"):
+                self.preview_button.config(text="Bật cập nhật màn hình")
+            return
+
+        try:
+            interval = max(300, int(self.preview_interval_ms.get()))
+        except (TypeError, ValueError):
+            messagebox.showwarning("Interval", "Khoảng thời gian preview phải là số nguyên (ms).")
+            return
+
+        self.preview_interval_ms.set(interval)
+        self.preview_running = True
+        self.status_var.set("Đang cập nhật màn hình tự động")
+        if hasattr(self, "preview_button"):
+            self.preview_button.config(text="Dừng cập nhật màn hình")
+        self._preview_job = self.root.after(50, self._run_live_preview)
+
+    def _run_live_preview(self) -> None:
+        if not self.preview_running:
+            return
+        try:
+            self.capture_manager.monitor_index = self.monitor_index.get()
+            live_image = self.capture_manager.grab_frame()
+            self.image = live_image
+            self._display_image(live_image)
+            self.status_var.set("Đang xem preview màn hình trực tiếp")
+        except Exception as exc:
+            self.status_var.set(f"Preview lỗi: {exc}")
+        finally:
+            if self.preview_running:
+                self._preview_job = self.root.after(self.preview_interval_ms.get(), self._run_live_preview)
 
     def _display_image(self, image: Image.Image) -> None:
         canvas_width = self.canvas.winfo_width() or 800
@@ -243,8 +301,13 @@ class OCRApp:
 
     def toggle_auto_ocr(self) -> None:
         if not self.image:
-            messagebox.showwarning("No capture", "Hãy capture màn hình để vẽ bounding box trước.")
-            return
+            try:
+                self.capture_manager.monitor_index = self.monitor_index.get()
+                self.image = self.capture_manager.grab_frame()
+                self._display_image(self.image)
+            except Exception:
+                messagebox.showwarning("No capture", "Hãy capture màn hình để vẽ bounding box trước.")
+                return
         if not self.box_manager.boxes:
             messagebox.showwarning("No boxes", "Cần ít nhất một bounding box để bật OCR liên tục.")
             return
