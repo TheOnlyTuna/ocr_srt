@@ -37,17 +37,23 @@ class OCRApp:
         self.monitor_index = tk.IntVar(value=1)
         self.languages_var = tk.StringVar(value="en,vi")
         self.gpu_var = tk.BooleanVar(value=False)
+        self.interval_ms_var = tk.IntVar(value=1500)
+        self.auto_running = False
+        self.auto_cycles = tk.IntVar(value=0)
 
         self.capture_manager = CaptureManager(monitor_index=self.monitor_index.get())
         self.image = None
         self.display_image = None
         self.photo = None
         self.canvas_rect = None
+        self._canvas_overlays: List[int] = []
         self.start_x = 0
         self.start_y = 0
         self.scale_x = 1.0
         self.scale_y = 1.0
         self.box_manager = BoundingBoxManager()
+        self.processor = None
+        self.processor_config: Tuple[Tuple[str, ...], bool] = (tuple(), False)
 
         self._build_layout()
 
@@ -70,6 +76,16 @@ class OCRApp:
         ttk.Checkbutton(control_frame, text="Use GPU", variable=self.gpu_var).pack(anchor=tk.W, pady=2)
 
         ttk.Button(control_frame, text="Run OCR", command=self.run_ocr).pack(fill=tk.X, pady=8)
+
+        ttk.Label(control_frame, text="Auto OCR", font=("Arial", 12, "bold")).pack(anchor=tk.W, pady=(10, 0))
+        interval_row = ttk.Frame(control_frame)
+        interval_row.pack(fill=tk.X, pady=2)
+        ttk.Label(interval_row, text="Interval (ms):").pack(side=tk.LEFT)
+        ttk.Entry(interval_row, textvariable=self.interval_ms_var, width=8).pack(side=tk.LEFT, padx=5)
+        self.auto_button = ttk.Button(control_frame, text="Bật OCR liên tục", command=self.toggle_auto_ocr)
+        self.auto_button.pack(fill=tk.X, pady=4)
+        ttk.Label(control_frame, text="Chu kỳ đã chạy:").pack(anchor=tk.W)
+        ttk.Label(control_frame, textvariable=self.auto_cycles, foreground="#9b2226").pack(anchor=tk.W)
 
         ttk.Label(control_frame, text="Bounding boxes", font=("Arial", 12, "bold")).pack(anchor=tk.W, pady=(10, 0))
         self.box_list = tk.Listbox(control_frame, height=10)
@@ -124,6 +140,7 @@ class OCRApp:
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, image=self.photo, anchor=tk.NW)
         self.canvas.config(scrollregion=self.canvas.bbox(tk.ALL))
+        self._draw_boxes()
 
     def on_mouse_down(self, event: tk.Event) -> None:
         if not self.display_image:
@@ -150,11 +167,29 @@ class OCRApp:
         self.box_manager.add_box(scaled_box)
         self._update_box_list()
         self.canvas_rect = None
+        self._draw_boxes()
 
     def _update_box_list(self) -> None:
         self.box_list.delete(0, tk.END)
         for idx, box in enumerate(self.box_manager.boxes):
             self.box_list.insert(tk.END, f"{idx+1}: {box}")
+
+    def _draw_boxes(self) -> None:
+        if not self.display_image:
+            return
+
+        for overlay in self._canvas_overlays:
+            self.canvas.delete(overlay)
+        self._canvas_overlays.clear()
+
+        for idx, box in enumerate(self.box_manager.boxes, start=1):
+            x1 = int(box[0] / self.scale_x)
+            y1 = int(box[1] / self.scale_y)
+            x2 = int(box[2] / self.scale_x)
+            y2 = int(box[3] / self.scale_y)
+            rect = self.canvas.create_rectangle(x1, y1, x2, y2, outline="#00d1b2", width=2)
+            label = self.canvas.create_text(x1 + 4, y1 + 4, anchor=tk.NW, text=str(idx), fill="#f4f4f4", font=("Arial", 10, "bold"))
+            self._canvas_overlays.extend([rect, label])
 
     def remove_selected_box(self) -> None:
         selection = self.box_list.curselection()
@@ -162,10 +197,12 @@ class OCRApp:
             return
         self.box_manager.remove(selection[0])
         self._update_box_list()
+        self._draw_boxes()
 
     def clear_boxes(self) -> None:
         self.box_manager.clear()
         self._update_box_list()
+        self._draw_boxes()
 
     def run_ocr(self) -> None:
         if not self.image:
@@ -183,14 +220,82 @@ class OCRApp:
         self.status_var.set("Đang chạy EasyOCR...")
         self.root.update_idletasks()
         try:
-            processor = OCRProcessor(languages=languages, gpu=self.gpu_var.get())
-            result = processor.run(self.image, self.box_manager.boxes, monitor_index=self.monitor_index.get())
-            path = processor.save_result(result, OUTPUT_DIR)
-            self.status_var.set(f"Hoàn thành! Lưu JSON tại {path}")
-            self._show_result_dialog(path, result.boxes)
+            result, path, latest_path = self._process_ocr(self.image, languages, show_dialog=True)
+            self.status_var.set(f"Hoàn thành! Lưu JSON tại {path} | latest: {latest_path}")
         except Exception as exc:
             messagebox.showerror("OCR failed", f"Lỗi khi chạy EasyOCR: {exc}")
             self.status_var.set("OCR thất bại")
+
+    def _process_ocr(self, image: Image.Image, languages: List[str], show_dialog: bool = False):
+        processor = self._get_processor(languages)
+        result = processor.run(image, self.box_manager.boxes, monitor_index=self.monitor_index.get())
+        path, latest_path = processor.save_result(result, OUTPUT_DIR)
+        if show_dialog:
+            self._show_result_dialog(path, result.boxes)
+        return result, path, latest_path
+
+    def _get_processor(self, languages: List[str]) -> OCRProcessor:
+        config = (tuple(languages), self.gpu_var.get())
+        if not self.processor or self.processor_config != config:
+            self.processor = OCRProcessor(languages=languages, gpu=self.gpu_var.get())
+            self.processor_config = config
+        return self.processor
+
+    def toggle_auto_ocr(self) -> None:
+        if not self.image:
+            messagebox.showwarning("No capture", "Hãy capture màn hình để vẽ bounding box trước.")
+            return
+        if not self.box_manager.boxes:
+            messagebox.showwarning("No boxes", "Cần ít nhất một bounding box để bật OCR liên tục.")
+            return
+
+        try:
+            interval = max(500, int(self.interval_ms_var.get()))
+        except (TypeError, ValueError):
+            messagebox.showwarning("Interval", "Khoảng thời gian phải là số nguyên (ms).")
+            return
+
+        if self.auto_running:
+            self.auto_running = False
+            self.status_var.set("Đã dừng OCR liên tục")
+            job = getattr(self, "_auto_job", None)
+            if job:
+                self.root.after_cancel(job)
+            self.auto_cycles.set(0)
+            self.auto_button.config(text="Bật OCR liên tục")
+            return
+
+        self.interval_ms_var.set(interval)
+        self.auto_running = True
+        self.status_var.set("Đang chạy OCR liên tục...")
+        self.auto_cycles.set(0)
+        self.auto_button.config(text="Dừng OCR liên tục")
+        self._auto_job = self.root.after(interval, self._run_auto_ocr)
+
+    def _run_auto_ocr(self) -> None:
+        if not self.auto_running:
+            return
+
+        try:
+            self.capture_manager.monitor_index = self.monitor_index.get()
+            live_image = self.capture_manager.grab_frame()
+            self.image = live_image
+            self._display_image(live_image)
+            languages = [lang.strip() for lang in self.languages_var.get().split(",") if lang.strip()]
+            if not languages:
+                raise ValueError("Languages rỗng; hãy nhập ví dụ en,vi")
+
+            self.status_var.set("OCR liên tục: đang đọc...")
+            result, path, latest_path = self._process_ocr(live_image, languages, show_dialog=False)
+            self.auto_cycles.set(self.auto_cycles.get() + 1)
+            self.status_var.set(
+                f"OCR liên tục #{self.auto_cycles.get()} | JSON: {path.name} | latest_result.json cập nhật"
+            )
+        except Exception as exc:
+            self.status_var.set(f"OCR liên tục lỗi: {exc}")
+        finally:
+            if self.auto_running:
+                self._auto_job = self.root.after(self.interval_ms_var.get(), self._run_auto_ocr)
 
     def _show_result_dialog(self, path: Path, boxes: List[Tuple[int, int, int, int]]) -> None:
         dialog = tk.Toplevel(self.root)

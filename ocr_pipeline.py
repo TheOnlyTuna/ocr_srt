@@ -74,9 +74,23 @@ class OCRProcessor:
         )
         return session
 
-    def save_result(self, result: OCRSessionResult, output_dir: Path) -> Path:
+    def save_result(self, result: OCRSessionResult, output_dir: Path) -> tuple[Path, Path]:
+        """Save the OCR session to a timestamped file and a stable latest file.
+
+        Returns
+        -------
+        tuple[Path, Path]
+            The timestamped path and the "latest_result.json" path.
+        """
+
         output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        json_data = result.to_json()
+
         path = output_dir / f"ocr_result_{timestamp}.json"
-        path.write_text(result.to_json(), encoding="utf-8")
-        return path
+        latest_path = output_dir / "latest_result.json"
+
+        path.write_text(json_data, encoding="utf-8")
+        latest_path.write_text(json_data, encoding="utf-8")
+
+        return path, latest_path
