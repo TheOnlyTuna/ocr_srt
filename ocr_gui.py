@@ -18,6 +18,14 @@ from ocr_pipeline import OCRProcessor
 OUTPUT_DIR = Path("outputs")
 KEEP_HISTORY = False  # tránh ghi quá nhiều file; bật True nếu muốn lưu lịch sử
 
+DECKLINK_PRESETS = {
+    "1080p59.94": {"size": "1920x1080", "fps": "59.94", "format": "1080p5994"},
+    "1080p60": {"size": "1920x1080", "fps": "60", "format": "1080p6000"},
+    "1080p50": {"size": "1920x1080", "fps": "50", "format": "1080p5000"},
+    "720p60": {"size": "1280x720", "fps": "60", "format": "720p6000"},
+    "720p50": {"size": "1280x720", "fps": "50", "format": "720p5000"},
+}
+
 
 class BoundingBoxManager:
     def __init__(self) -> None:
@@ -50,6 +58,7 @@ class OCRApp:
         self.decklink_device_var = tk.StringVar(value="DeckLink Duo (1)")
         self.decklink_fps_var = tk.StringVar(value="60")
         self.decklink_size_var = tk.StringVar(value="1920x1080")
+        self.decklink_format_var = tk.StringVar(value="1080p60")
         self.auto_running = False
         self.auto_cycles = tk.IntVar(value=0)
         self.preview_running = False
@@ -72,6 +81,7 @@ class OCRApp:
         self.processor_config: Tuple[Tuple[str, ...], bool] = (tuple(), False)
 
         self._build_layout()
+        self._apply_decklink_preset()
         self._refresh_decklink_devices(initial=True)
         self._start_live_preview()
 
@@ -106,6 +116,19 @@ class OCRApp:
         )
         self.decklink_combo.pack(side=tk.LEFT, padx=4)
         ttk.Button(decklink_row, text="Refresh", command=self._refresh_decklink_devices).pack(side=tk.LEFT, padx=2)
+
+        decklink_mode = ttk.Frame(control_frame)
+        decklink_mode.pack(fill=tk.X, pady=2)
+        ttk.Label(decklink_mode, text="Mode:").pack(side=tk.LEFT)
+        self.decklink_mode_combo = ttk.Combobox(
+            decklink_mode,
+            textvariable=self.decklink_format_var,
+            values=list(DECKLINK_PRESETS.keys()),
+            width=12,
+            state="readonly",
+        )
+        self.decklink_mode_combo.pack(side=tk.LEFT, padx=4)
+        self.decklink_mode_combo.bind("<<ComboboxSelected>>", self._apply_decklink_preset)
 
         decklink_opts = ttk.Frame(control_frame)
         decklink_opts.pack(fill=tk.X, pady=2)
@@ -185,6 +208,15 @@ class OCRApp:
 
         if not initial:
             self.status_var.set(f"Đã tải {len(devices)} DeckLink input giống OBS")
+
+    def _apply_decklink_preset(self, _event=None) -> None:
+        preset = self.decklink_format_var.get()
+        config = DECKLINK_PRESETS.get(preset)
+        if not config:
+            return
+        self.decklink_size_var.set(config["size"])
+        self.decklink_fps_var.set(config["fps"])
+        self.status_var.set(f"Áp dụng mode {preset} (DeckLink giống OBS)")
 
     def capture_screen(self) -> None:
         try:
@@ -472,6 +504,8 @@ class OCRApp:
         device = self.decklink_device_var.get().strip()
         fps = self.decklink_fps_var.get().strip() or "60"
         size = self.decklink_size_var.get().strip() or "1920x1080"
+        preset_key = self.decklink_format_var.get()
+        video_format = DECKLINK_PRESETS.get(preset_key, {}).get("format")
 
         if not device:
             messagebox.showwarning("DeckLink", "Hãy nhập tên thiết bị DeckLink (ví dụ DeckLink Duo (1))")
@@ -479,7 +513,7 @@ class OCRApp:
 
         if self.decklink_capture:
             self.decklink_capture.stop()
-        self.decklink_capture = DeckLinkCapture(device=device, video_size=size, fps=fps)
+        self.decklink_capture = DeckLinkCapture(device=device, video_size=size, fps=fps, video_format=video_format)
         self.decklink_capture.start()
         self.source_var.set("decklink")
         self._ensure_preview_running()
@@ -488,6 +522,11 @@ class OCRApp:
 
     def _await_decklink_frame(self, retries: int = 30, delay_ms: int = 200) -> None:
         if not self.decklink_capture:
+            return
+
+        if self.decklink_capture.error:
+            self.status_var.set(f"DeckLink lỗi: {self.decklink_capture.error}")
+            messagebox.showerror("DeckLink", f"Không nhận được khung hình: {self.decklink_capture.error}")
             return
 
         frame = self.decklink_capture.get_latest_frame()

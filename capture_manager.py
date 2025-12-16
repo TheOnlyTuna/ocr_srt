@@ -168,10 +168,17 @@ class SRTStreamCapture:
 class DeckLinkCapture:
     """Capture frames from a Blackmagic DeckLink device via PyAV."""
 
-    def __init__(self, device: str, video_size: str = "1920x1080", fps: str = "60") -> None:
+    def __init__(
+        self,
+        device: str,
+        video_size: str = "1920x1080",
+        fps: str = "60",
+        video_format: Optional[str] = None,
+    ) -> None:
         self.device = device
         self.video_size = video_size
         self.fps = fps
+        self.video_format = video_format
         self.container: Optional[av.container.input.InputContainer] = None
         self.stream: Optional[av.video.stream.VideoStream] = None
         self.latest_frame: Optional[Image.Image] = None
@@ -182,6 +189,7 @@ class DeckLinkCapture:
     def start(self) -> None:
         if self.running:
             return
+        self.error = None
         self.running = True
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
@@ -198,10 +206,14 @@ class DeckLinkCapture:
 
     def _run(self) -> None:
         try:
+            options = {"video_size": self.video_size, "framerate": self.fps}
+            if self.video_format:
+                options["video_format"] = self.video_format
+
             self.container = av.open(
                 f"decklink:{self.device}",
                 format="decklink",
-                options={"video_size": self.video_size, "framerate": self.fps},
+                options=options,
             )
             video_streams = [s for s in self.container.streams if s.type == "video"]
             if not video_streams:
