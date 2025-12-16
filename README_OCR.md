@@ -8,6 +8,7 @@ Tool OCR chuyên nghiệp với các tính năng tiền xử lý ảnh nâng cao
 - 🔴 **Preview realtime không cần bấm**: Màn hình được cập nhật liên tục theo chu kỳ, luôn hiển thị frame mới nhất để vẽ box và chạy OCR.
 - 🔁 **OCR liên tục + realtime JSON**: Hẹn giờ OCR tự động trên bounding box đã chọn, luôn ghi đè `outputs/latest_result.json` để các web view (HTML/PHP) đọc realtime (không tạo thêm file để tránh đầy ổ cứng).
 - 🎥 **Nguồn DeckLink**: Nhận trực tiếp luồng SDI/HDMI từ Blackmagic DeckLink (ví dụ DeckLink Duo) qua PyAV, hạn chế dropframe.
+- 🎛️ **Chọn DeckLink giống OBS**: Quét danh sách card DeckLink (DeckLink Duo (1..4)) và bật preview ngay sau khi kết nối để vẽ bounding box trước khi OCR.
 
 ### Tự động phát hiện và điều chỉnh (Mới!)
 - ✅ **Tự động phân tích ảnh**: Phát hiện kích thước, chất lượng, blur, độ tương phản
@@ -52,7 +53,7 @@ python ocr_gui.py
 1. Chọn nguồn capture:
    - **Monitor**: nhập `Monitor index` (mặc định 1); preview sẽ tự cập nhật frame mới nhất hoặc bấm **Capture screen**.
    - **SRT**: nhập URL dạng `srt://IP:PORT`, bấm **Kết nối SRT** để nhận khung hình realtime từ VLC/encoder SRT và preview tự cập nhật.
-   - **DeckLink**: nhập tên thiết bị (ví dụ `DeckLink Duo (1)`), độ phân giải `WidthxHeight` và FPS, bấm **Kết nối DeckLink** để xem preview và chạy OCR trực tiếp trên luồng SDI/HDMI.
+    - **DeckLink**: chọn thiết bị trong combobox (tự quét giống OBS, hiển thị sẵn `DeckLink Duo (1..4)`), nhập độ phân giải `WidthxHeight` và FPS nếu cần, bấm **Kết nối DeckLink** để xem preview ngay và chạy OCR trực tiếp trên luồng SDI/HDMI.
 2. Trên preview, kéo thả chuột để vẽ các bounding box cho vùng cần đọc.
 3. Chọn ngôn ngữ (ví dụ `en,vi`), bật/tắt GPU nếu cần.
 4. Nhấn **Run OCR** → EasyOCR chạy trên từng bounding box, ghi đè `outputs/latest_result.json` (không tạo thêm file). Nếu muốn lưu lịch sử, đặt `KEEP_HISTORY = True` trong `ocr_gui.py`.

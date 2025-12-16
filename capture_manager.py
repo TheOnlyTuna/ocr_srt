@@ -23,6 +23,37 @@ from PIL import Image
 import av
 
 
+def list_decklink_devices() -> List[str]:
+    """Return available DeckLink device names similar to how OBS lists them.
+
+    PyAV exposes decklink inputs through ``av.devices.Device.list_input_sources`` on
+    builds compiled with DeckLink support. If device discovery is unavailable, fall
+    back to common Duo labels so users can still pick a port manually.
+    """
+
+    devices: List[str] = []
+    device_module = getattr(av, "devices", None)
+    device_cls = getattr(device_module, "Device", None)
+    list_func = getattr(device_cls, "list_input_sources", None)
+    if callable(list_func):
+        try:
+            sources = list_func("decklink")
+            for src in sources:
+                # PyAV returns a mapping with keys like "name" / "device" / "description"
+                if isinstance(src, dict):
+                    label = src.get("name") or src.get("device") or src.get("description")
+                else:
+                    label = str(src)
+                if label:
+                    devices.append(label)
+        except Exception:
+            pass
+
+    if not devices:
+        devices = [f"DeckLink Duo ({idx})" for idx in range(1, 5)]
+    return devices
+
+
 @dataclass
 class MonitorInfo:
     index: int

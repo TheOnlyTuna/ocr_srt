@@ -7,7 +7,12 @@ from tkinter import messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from capture_manager import CaptureManager, DeckLinkCapture, SRTStreamCapture
+from capture_manager import (
+    CaptureManager,
+    DeckLinkCapture,
+    SRTStreamCapture,
+    list_decklink_devices,
+)
 from ocr_pipeline import OCRProcessor
 
 OUTPUT_DIR = Path("outputs")
@@ -48,6 +53,7 @@ class OCRApp:
         self.auto_running = False
         self.auto_cycles = tk.IntVar(value=0)
         self.preview_running = False
+        self.decklink_devices: List[str] = []
 
         self.capture_manager = CaptureManager(monitor_index=self.monitor_index.get())
         self.srt_capture: SRTStreamCapture | None = None
@@ -66,6 +72,7 @@ class OCRApp:
         self.processor_config: Tuple[Tuple[str, ...], bool] = (tuple(), False)
 
         self._build_layout()
+        self._refresh_decklink_devices(initial=True)
         self._start_live_preview()
 
     def _build_layout(self) -> None:
@@ -94,7 +101,11 @@ class OCRApp:
         decklink_row = ttk.Frame(control_frame)
         decklink_row.pack(fill=tk.X, pady=2)
         ttk.Label(decklink_row, text="DeckLink device:").pack(side=tk.LEFT)
-        ttk.Entry(decklink_row, textvariable=self.decklink_device_var, width=20).pack(side=tk.LEFT, padx=4)
+        self.decklink_combo = ttk.Combobox(
+            decklink_row, textvariable=self.decklink_device_var, width=22, state="readonly"
+        )
+        self.decklink_combo.pack(side=tk.LEFT, padx=4)
+        ttk.Button(decklink_row, text="Refresh", command=self._refresh_decklink_devices).pack(side=tk.LEFT, padx=2)
 
         decklink_opts = ttk.Frame(control_frame)
         decklink_opts.pack(fill=tk.X, pady=2)
@@ -160,6 +171,21 @@ class OCRApp:
         monitor_info = " | ".join([f"{m.index}: {m.width}x{m.height}" for m in monitors])
         messagebox.showinfo("Monitors", f"Monitors detected: {monitor_info}")
 
+    def _refresh_decklink_devices(self, initial: bool = False) -> None:
+        devices = list_decklink_devices()
+        self.decklink_devices = devices
+        if not devices:
+            self.status_var.set("Không tìm thấy DeckLink (dùng tên thủ công nếu cần)")
+            return
+
+        if hasattr(self, "decklink_combo"):
+            self.decklink_combo["values"] = devices
+            if not self.decklink_device_var.get() or self.decklink_device_var.get() not in devices:
+                self.decklink_device_var.set(devices[0])
+
+        if not initial:
+            self.status_var.set(f"Đã tải {len(devices)} DeckLink input giống OBS")
+
     def capture_screen(self) -> None:
         try:
             self.image = self._grab_current_frame()
@@ -199,6 +225,10 @@ class OCRApp:
         if hasattr(self, "preview_button"):
             self.preview_button.config(text="Dừng cập nhật màn hình")
         self._preview_job = self.root.after(50, self._run_live_preview)
+
+    def _ensure_preview_running(self) -> None:
+        if not self.preview_running:
+            self._start_live_preview()
 
     def _run_live_preview(self) -> None:
         if not self.preview_running:
@@ -452,7 +482,26 @@ class OCRApp:
         self.decklink_capture = DeckLinkCapture(device=device, video_size=size, fps=fps)
         self.decklink_capture.start()
         self.source_var.set("decklink")
+        self._ensure_preview_running()
         self.status_var.set("Đang kết nối DeckLink... chờ khung hình đầu tiên")
+        self._await_decklink_frame()
+
+    def _await_decklink_frame(self, retries: int = 30, delay_ms: int = 200) -> None:
+        if not self.decklink_capture:
+            return
+
+        frame = self.decklink_capture.get_latest_frame()
+        if frame is not None:
+            self.image = frame
+            self._display_image(frame)
+            self.status_var.set("DeckLink đã lên hình. Vẽ bounding rồi chạy OCR.")
+            return
+
+        if retries <= 0:
+            self.status_var.set("DeckLink chưa có hình. Kiểm tra cáp / định dạng input.")
+            return
+
+        self.root.after(delay_ms, lambda: self._await_decklink_frame(retries=retries - 1, delay_ms=delay_ms))
 
 
 def main() -> None:
