@@ -1,4 +1,5 @@
 import datetime
+import os
 from dataclasses import dataclass
 import threading
 from typing import List, Optional, Tuple
@@ -186,6 +187,31 @@ class DeckLinkCapture:
         self.thread: Optional[threading.Thread] = None
         self.error: Optional[str] = None
 
+    def _pick_backend(self) -> Tuple[Optional[str], Optional[str], List[str]]:
+        """Select the best available backend and URL for DeckLink-like devices.
+
+        Returns (format_name, input_url, available_formats) and prefers:
+        1) decklink (requires FFmpeg/PyAV built with DeckLink)
+        2) dshow on Windows as a lightweight fallback
+        """
+
+        available: List[str] = []
+        formats_fn = getattr(av.format, "available_input_formats", None)
+        if callable(formats_fn):
+            try:
+                available = sorted(formats_fn().keys())
+            except Exception:
+                available = []
+
+        if "decklink" in available:
+            return "decklink", f"decklink:{self.device}", available
+
+        if os.name == "nt" and "dshow" in available:
+            # Blackmagic exposes DirectShow sources on Windows; try mapping directly
+            return "dshow", f"video={self.device}", available
+
+        return None, None, available
+
     def start(self) -> None:
         if self.running:
             return
@@ -206,13 +232,21 @@ class DeckLinkCapture:
 
     def _run(self) -> None:
         try:
+            fmt, url, available = self._pick_backend()
+            if not fmt or not url:
+                raise RuntimeError(
+                    "PyAV/FFmpeg không hỗ trợ DeckLink. Hãy cài FFmpeg/PyAV build với --enable-decklink "
+                    "hoặc dùng backend DirectShow trên Windows. Các định dạng hiện có: "
+                    f"{', '.join(available) if available else 'Không phát hiện được'}"
+                )
+
             options = {"video_size": self.video_size, "framerate": self.fps}
-            if self.video_format:
+            if self.video_format and fmt == "decklink":
                 options["video_format"] = self.video_format
 
             self.container = av.open(
-                f"decklink:{self.device}",
-                format="decklink",
+                url,
+                format=fmt,
                 options=options,
             )
             video_streams = [s for s in self.container.streams if s.type == "video"]
