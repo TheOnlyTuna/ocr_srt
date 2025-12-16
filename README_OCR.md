@@ -6,7 +6,8 @@ Tool OCR chuyên nghiệp với các tính năng tiền xử lý ảnh nâng cao
 
 - 🆕 **Capture màn hình + bounding box tuỳ chọn**: Capture trực tiếp từ màn hình (bao gồm fullscreen), vẽ bounding box cho từng vùng cần đọc, lưu kết quả OCR và toạ độ vào file JSON.
 - 🔴 **Preview realtime không cần bấm**: Màn hình được cập nhật liên tục theo chu kỳ, luôn hiển thị frame mới nhất để vẽ box và chạy OCR.
-- 🔁 **OCR liên tục + realtime JSON**: Hẹn giờ OCR tự động trên bounding box đã chọn, luôn ghi đè `outputs/latest_result.json` để các web view (HTML/PHP) đọc realtime.
+- 🔁 **OCR liên tục + realtime JSON**: Hẹn giờ OCR tự động trên bounding box đã chọn, luôn ghi đè `outputs/latest_result.json` để các web view (HTML/PHP) đọc realtime (không tạo thêm file để tránh đầy ổ cứng).
+- 🎥 **Nguồn DeckLink**: Nhận trực tiếp luồng SDI/HDMI từ Blackmagic DeckLink (ví dụ DeckLink Duo) qua PyAV, hạn chế dropframe.
 
 ### Tự động phát hiện và điều chỉnh (Mới!)
 - ✅ **Tự động phân tích ảnh**: Phát hiện kích thước, chất lượng, blur, độ tương phản
@@ -51,13 +52,14 @@ python ocr_gui.py
 1. Chọn nguồn capture:
    - **Monitor**: nhập `Monitor index` (mặc định 1); preview sẽ tự cập nhật frame mới nhất hoặc bấm **Capture screen**.
    - **SRT**: nhập URL dạng `srt://IP:PORT`, bấm **Kết nối SRT** để nhận khung hình realtime từ VLC/encoder SRT và preview tự cập nhật.
+   - **DeckLink**: nhập tên thiết bị (ví dụ `DeckLink Duo (1)`), độ phân giải `WidthxHeight` và FPS, bấm **Kết nối DeckLink** để xem preview và chạy OCR trực tiếp trên luồng SDI/HDMI.
 2. Trên preview, kéo thả chuột để vẽ các bounding box cho vùng cần đọc.
 3. Chọn ngôn ngữ (ví dụ `en,vi`), bật/tắt GPU nếu cần.
-4. Nhấn **Run OCR** → EasyOCR chạy trên từng bounding box, lưu kết quả và toạ độ vào file JSON trong thư mục `outputs/`.
+4. Nhấn **Run OCR** → EasyOCR chạy trên từng bounding box, ghi đè `outputs/latest_result.json` (không tạo thêm file). Nếu muốn lưu lịch sử, đặt `KEEP_HISTORY = True` trong `ocr_gui.py`.
 
 **OCR liên tục (auto):**
 - Sau khi vẽ bounding box (preview đã tự lấy ảnh), nhập chu kỳ (ms) trong mục **Auto OCR**.
-- Nhấn **Bật OCR liên tục** để chạy lặp; ứng dụng sẽ tự capture màn hình, OCR và ghi đè `outputs/latest_result.json` sau mỗi chu kỳ (đồng thời lưu file có timestamp).
+- Nhấn **Bật OCR liên tục** để chạy lặp; ứng dụng sẽ tự capture màn hình, OCR và ghi đè `outputs/latest_result.json` sau mỗi chu kỳ (mặc định **không** lưu file timestamp để tiết kiệm dung lượng).
 - Nhấn lại nút để dừng.
 
 **Auto preview:**

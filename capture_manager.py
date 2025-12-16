@@ -132,3 +132,68 @@ class SRTStreamCapture:
 
     def get_latest_frame(self) -> Optional[Image.Image]:
         return self.latest_frame
+
+
+class DeckLinkCapture:
+    """Capture frames from a Blackmagic DeckLink device via PyAV."""
+
+    def __init__(self, device: str, video_size: str = "1920x1080", fps: str = "60") -> None:
+        self.device = device
+        self.video_size = video_size
+        self.fps = fps
+        self.container: Optional[av.container.input.InputContainer] = None
+        self.stream: Optional[av.video.stream.VideoStream] = None
+        self.latest_frame: Optional[Image.Image] = None
+        self.running = False
+        self.thread: Optional[threading.Thread] = None
+        self.error: Optional[str] = None
+
+    def start(self) -> None:
+        if self.running:
+            return
+        self.running = True
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.running = False
+        if self.container:
+            try:
+                self.container.close()
+            except Exception:
+                pass
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=2)
+
+    def _run(self) -> None:
+        try:
+            self.container = av.open(
+                f"decklink:{self.device}",
+                format="decklink",
+                options={"video_size": self.video_size, "framerate": self.fps},
+            )
+            video_streams = [s for s in self.container.streams if s.type == "video"]
+            if not video_streams:
+                raise RuntimeError("Không tìm thấy video stream từ DeckLink")
+            self.stream = video_streams[0]
+            self.stream.thread_type = "AUTO"
+            for packet in self.container.demux(self.stream):
+                if not self.running:
+                    break
+                for frame in packet.decode():
+                    if not self.running:
+                        break
+                    img = frame.to_ndarray(format="rgb24")
+                    self.latest_frame = Image.fromarray(img)
+        except Exception as exc:
+            self.error = str(exc)
+        finally:
+            if self.container:
+                try:
+                    self.container.close()
+                except Exception:
+                    pass
+            self.running = False
+
+    def get_latest_frame(self) -> Optional[Image.Image]:
+        return self.latest_frame

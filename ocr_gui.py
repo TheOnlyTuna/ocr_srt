@@ -7,10 +7,11 @@ from tkinter import messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from capture_manager import CaptureManager, SRTStreamCapture
+from capture_manager import CaptureManager, DeckLinkCapture, SRTStreamCapture
 from ocr_pipeline import OCRProcessor
 
 OUTPUT_DIR = Path("outputs")
+KEEP_HISTORY = False  # tránh ghi quá nhiều file; bật True nếu muốn lưu lịch sử
 
 
 class BoundingBoxManager:
@@ -41,12 +42,16 @@ class OCRApp:
         self.interval_ms_var = tk.IntVar(value=1500)
         self.preview_interval_ms = tk.IntVar(value=1000)
         self.srt_url_var = tk.StringVar(value="srt://127.0.0.1:9000")
+        self.decklink_device_var = tk.StringVar(value="DeckLink Duo (1)")
+        self.decklink_fps_var = tk.StringVar(value="60")
+        self.decklink_size_var = tk.StringVar(value="1920x1080")
         self.auto_running = False
         self.auto_cycles = tk.IntVar(value=0)
         self.preview_running = False
 
         self.capture_manager = CaptureManager(monitor_index=self.monitor_index.get())
         self.srt_capture: SRTStreamCapture | None = None
+        self.decklink_capture = None
         self.image = None
         self.display_image = None
         self.photo = None
@@ -72,6 +77,7 @@ class OCRApp:
         source_row.pack(fill=tk.X, pady=2)
         ttk.Radiobutton(source_row, text="Monitor", variable=self.source_var, value="monitor").pack(side=tk.LEFT)
         ttk.Radiobutton(source_row, text="SRT", variable=self.source_var, value="srt").pack(side=tk.LEFT, padx=4)
+        ttk.Radiobutton(source_row, text="DeckLink", variable=self.source_var, value="decklink").pack(side=tk.LEFT, padx=4)
 
         monitor_row = ttk.Frame(control_frame)
         monitor_row.pack(fill=tk.X, pady=5)
@@ -84,6 +90,19 @@ class OCRApp:
         ttk.Label(srt_row, text="SRT URL:").pack(side=tk.LEFT)
         ttk.Entry(srt_row, textvariable=self.srt_url_var, width=26).pack(side=tk.LEFT, padx=4)
         ttk.Button(control_frame, text="Kết nối SRT", command=self.connect_srt).pack(fill=tk.X, pady=4)
+
+        decklink_row = ttk.Frame(control_frame)
+        decklink_row.pack(fill=tk.X, pady=2)
+        ttk.Label(decklink_row, text="DeckLink device:").pack(side=tk.LEFT)
+        ttk.Entry(decklink_row, textvariable=self.decklink_device_var, width=20).pack(side=tk.LEFT, padx=4)
+
+        decklink_opts = ttk.Frame(control_frame)
+        decklink_opts.pack(fill=tk.X, pady=2)
+        ttk.Label(decklink_opts, text="Size (WxH):").pack(side=tk.LEFT)
+        ttk.Entry(decklink_opts, textvariable=self.decklink_size_var, width=9).pack(side=tk.LEFT, padx=2)
+        ttk.Label(decklink_opts, text="FPS:").pack(side=tk.LEFT)
+        ttk.Entry(decklink_opts, textvariable=self.decklink_fps_var, width=5).pack(side=tk.LEFT, padx=2)
+        ttk.Button(control_frame, text="Kết nối DeckLink", command=self.connect_decklink).pack(fill=tk.X, pady=4)
 
         ttk.Button(control_frame, text="Capture screen", command=self.capture_screen).pack(fill=tk.X, pady=5)
 
@@ -290,8 +309,8 @@ class OCRApp:
         self.status_var.set("Đang chạy EasyOCR...")
         self.root.update_idletasks()
         try:
-            result, path, latest_path = self._process_ocr(self.image, languages, show_dialog=True)
-            self.status_var.set(f"Hoàn thành! Lưu JSON tại {path} | latest: {latest_path}")
+            result, latest_path = self._process_ocr(self.image, languages, show_dialog=True)
+            self.status_var.set(f"Hoàn thành! Lưu JSON tại {latest_path}")
         except Exception as exc:
             messagebox.showerror("OCR failed", f"Lỗi khi chạy EasyOCR: {exc}")
             self.status_var.set("OCR thất bại")
@@ -299,10 +318,10 @@ class OCRApp:
     def _process_ocr(self, image: Image.Image, languages: List[str], show_dialog: bool = False):
         processor = self._get_processor(languages)
         result = processor.run(image, self.box_manager.boxes, monitor_index=self.monitor_index.get())
-        path, latest_path = processor.save_result(result, OUTPUT_DIR)
+        latest_path = processor.save_result(result, OUTPUT_DIR, keep_history=KEEP_HISTORY)
         if show_dialog:
-            self._show_result_dialog(path, result.boxes)
-        return result, path, latest_path
+            self._show_result_dialog(latest_path, result.boxes)
+        return result, latest_path
 
     def _get_processor(self, languages: List[str]) -> OCRProcessor:
         config = (tuple(languages), self.gpu_var.get())
@@ -360,10 +379,10 @@ class OCRApp:
                 raise ValueError("Languages rỗng; hãy nhập ví dụ en,vi")
 
             self.status_var.set("OCR liên tục: đang đọc...")
-            result, path, latest_path = self._process_ocr(live_image, languages, show_dialog=False)
+            result, latest_path = self._process_ocr(live_image, languages, show_dialog=False)
             self.auto_cycles.set(self.auto_cycles.get() + 1)
             self.status_var.set(
-                f"OCR liên tục #{self.auto_cycles.get()} | JSON: {path.name} | latest_result.json cập nhật"
+                f"OCR liên tục #{self.auto_cycles.get()} | JSON: {latest_path.name} (ghi đè)"
             )
         except Exception as exc:
             self.status_var.set(f"OCR liên tục lỗi: {exc}")
@@ -395,6 +414,14 @@ class OCRApp:
                 raise RuntimeError("Chưa nhận frame từ SRT. Hãy đợi vài giây hoặc kiểm tra URL.")
             return frame
 
+        if self.source_var.get() == "decklink":
+            if not self.decklink_capture or not self.decklink_capture.running:
+                raise RuntimeError("Chưa kết nối DeckLink hoặc stream chưa sẵn sàng.")
+            frame = self.decklink_capture.get_latest_frame()
+            if frame is None:
+                raise RuntimeError("Chưa nhận frame từ DeckLink. Kiểm tra thiết bị/độ phân giải.")
+            return frame
+
         self.capture_manager.monitor_index = self.monitor_index.get()
         return self.capture_manager.grab_frame()
 
@@ -410,6 +437,22 @@ class OCRApp:
         self.srt_capture.start()
         self.source_var.set("srt")
         self.status_var.set("Đang kết nối tới SRT... chờ khung hình đầu tiên")
+
+    def connect_decklink(self) -> None:
+        device = self.decklink_device_var.get().strip()
+        fps = self.decklink_fps_var.get().strip() or "60"
+        size = self.decklink_size_var.get().strip() or "1920x1080"
+
+        if not device:
+            messagebox.showwarning("DeckLink", "Hãy nhập tên thiết bị DeckLink (ví dụ DeckLink Duo (1))")
+            return
+
+        if self.decklink_capture:
+            self.decklink_capture.stop()
+        self.decklink_capture = DeckLinkCapture(device=device, video_size=size, fps=fps)
+        self.decklink_capture.start()
+        self.source_var.set("decklink")
+        self.status_var.set("Đang kết nối DeckLink... chờ khung hình đầu tiên")
 
 
 def main() -> None:

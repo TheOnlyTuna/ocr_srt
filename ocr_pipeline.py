@@ -74,23 +74,23 @@ class OCRProcessor:
         )
         return session
 
-    def save_result(self, result: OCRSessionResult, output_dir: Path) -> tuple[Path, Path]:
-        """Save the OCR session to a timestamped file and a stable latest file.
+    def save_result(self, result: OCRSessionResult, output_dir: Path, keep_history: bool = False) -> Path:
+        """Persist the latest OCR session as JSON.
 
-        Returns
-        -------
-        tuple[Path, Path]
-            The timestamped path and the "latest_result.json" path.
+        When ``keep_history`` is False (mặc định), chỉ ghi đè một file ``latest_result.json``
+        để tránh tạo quá nhiều file trên máy. Nếu cần lưu lại lịch sử, bật ``keep_history``
+        để ghi thêm file timestamp.
         """
 
         output_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         json_data = result.to_json()
 
-        path = output_dir / f"ocr_result_{timestamp}.json"
         latest_path = output_dir / "latest_result.json"
-
-        path.write_text(json_data, encoding="utf-8")
         latest_path.write_text(json_data, encoding="utf-8")
 
-        return path, latest_path
+        if keep_history:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            history_path = output_dir / f"ocr_result_{timestamp}.json"
+            history_path.write_text(json_data, encoding="utf-8")
+
+        return latest_path
