@@ -1,5 +1,6 @@
 import datetime
 import os
+import subprocess
 from dataclasses import dataclass
 import threading
 from typing import List, Optional, Tuple
@@ -25,30 +26,33 @@ import av
 
 
 def list_decklink_devices() -> List[str]:
-    """Return available DeckLink device names similar to how OBS lists them.
+    """Return DeckLink names via DirectShow discovery (Windows/FFmpeg)."""
 
-    PyAV exposes decklink inputs through ``av.devices.Device.list_input_sources`` on
-    builds compiled with DeckLink support. If device discovery is unavailable, fall
-    back to common Duo labels so users can still pick a port manually.
-    """
+    if os.name != "nt":
+        return []
+
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-f", "dshow", "-list_devices", "true", "-i", "dummy"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return [f"DeckLink Duo ({idx})" for idx in range(1, 5)]
 
     devices: List[str] = []
-    device_module = getattr(av, "devices", None)
-    device_cls = getattr(device_module, "Device", None)
-    list_func = getattr(device_cls, "list_input_sources", None)
-    if callable(list_func):
-        try:
-            sources = list_func("decklink")
-            for src in sources:
-                # PyAV returns a mapping with keys like "name" / "device" / "description"
-                if isinstance(src, dict):
-                    label = src.get("name") or src.get("device") or src.get("description")
-                else:
-                    label = str(src)
-                if label:
-                    devices.append(label)
-        except Exception:
-            pass
+    for line in proc.stderr.splitlines():
+        line = line.strip()
+        if "DirectShow video devices" in line:
+            devices.clear()
+        if "\"" in line and "video devices" not in line:
+            # lines look like: "  \"Decklink Video Capture (1)\""
+            parts = line.split("\"")
+            if len(parts) >= 2:
+                name = parts[1]
+                if name and name not in devices:
+                    devices.append(name)
 
     if not devices:
         devices = [f"DeckLink Duo ({idx})" for idx in range(1, 5)]
@@ -166,51 +170,19 @@ class SRTStreamCapture:
         return self.latest_frame
 
 
-class DeckLinkCapture:
-    """Capture frames from a Blackmagic DeckLink device via PyAV."""
+class DirectShowCapture:
+    """Capture frames from DirectShow (e.g., DeckLink WDM devices) via FFmpeg/PyAV."""
 
-    def __init__(
-        self,
-        device: str,
-        video_size: str = "1920x1080",
-        fps: str = "60",
-        video_format: Optional[str] = None,
-    ) -> None:
+    def __init__(self, device: str, video_size: str = "1920x1080", fps: str = "60") -> None:
         self.device = device
         self.video_size = video_size
         self.fps = fps
-        self.video_format = video_format
         self.container: Optional[av.container.input.InputContainer] = None
         self.stream: Optional[av.video.stream.VideoStream] = None
         self.latest_frame: Optional[Image.Image] = None
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.error: Optional[str] = None
-
-    def _pick_backend(self) -> Tuple[Optional[str], Optional[str], List[str]]:
-        """Select the best available backend and URL for DeckLink-like devices.
-
-        Returns (format_name, input_url, available_formats) and prefers:
-        1) decklink (requires FFmpeg/PyAV built with DeckLink)
-        2) dshow on Windows as a lightweight fallback
-        """
-
-        available: List[str] = []
-        formats_fn = getattr(av.format, "available_input_formats", None)
-        if callable(formats_fn):
-            try:
-                available = sorted(formats_fn().keys())
-            except Exception:
-                available = []
-
-        if "decklink" in available:
-            return "decklink", f"decklink:{self.device}", available
-
-        if os.name == "nt" and "dshow" in available:
-            # Blackmagic exposes DirectShow sources on Windows; try mapping directly
-            return "dshow", f"video={self.device}", available
-
-        return None, None, available
 
     def start(self) -> None:
         if self.running:
@@ -232,26 +204,17 @@ class DeckLinkCapture:
 
     def _run(self) -> None:
         try:
-            fmt, url, available = self._pick_backend()
-            if not fmt or not url:
-                raise RuntimeError(
-                    "PyAV/FFmpeg không hỗ trợ DeckLink. Hãy cài FFmpeg/PyAV build với --enable-decklink "
-                    "hoặc dùng backend DirectShow trên Windows. Các định dạng hiện có: "
-                    f"{', '.join(available) if available else 'Không phát hiện được'}"
-                )
-
-            options = {"video_size": self.video_size, "framerate": self.fps}
-            if self.video_format and fmt == "decklink":
-                options["video_format"] = self.video_format
+            if os.name != "nt":
+                raise RuntimeError("DirectShow chỉ khả dụng trên Windows.")
 
             self.container = av.open(
-                url,
-                format=fmt,
-                options=options,
+                f"video={self.device}",
+                format="dshow",
+                options={"video_size": self.video_size, "framerate": self.fps},
             )
             video_streams = [s for s in self.container.streams if s.type == "video"]
             if not video_streams:
-                raise RuntimeError("Không tìm thấy video stream từ DeckLink")
+                raise RuntimeError("Không tìm thấy video stream từ DirectShow")
             self.stream = video_streams[0]
             self.stream.thread_type = "AUTO"
             for packet in self.container.demux(self.stream):

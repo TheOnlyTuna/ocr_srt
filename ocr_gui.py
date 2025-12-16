@@ -9,7 +9,7 @@ from PIL import Image, ImageTk
 
 from capture_manager import (
     CaptureManager,
-    DeckLinkCapture,
+    DirectShowCapture,
     SRTStreamCapture,
     list_decklink_devices,
 )
@@ -19,11 +19,11 @@ OUTPUT_DIR = Path("outputs")
 KEEP_HISTORY = False  # tránh ghi quá nhiều file; bật True nếu muốn lưu lịch sử
 
 DECKLINK_PRESETS = {
-    "1080p59.94": {"size": "1920x1080", "fps": "59.94", "format": "1080p5994"},
-    "1080p60": {"size": "1920x1080", "fps": "60", "format": "1080p6000"},
-    "1080p50": {"size": "1920x1080", "fps": "50", "format": "1080p5000"},
-    "720p60": {"size": "1280x720", "fps": "60", "format": "720p6000"},
-    "720p50": {"size": "1280x720", "fps": "50", "format": "720p5000"},
+    "1080p59.94": {"size": "1920x1080", "fps": "59.94"},
+    "1080p60": {"size": "1920x1080", "fps": "60"},
+    "1080p50": {"size": "1920x1080", "fps": "50"},
+    "720p60": {"size": "1280x720", "fps": "60"},
+    "720p50": {"size": "1280x720", "fps": "50"},
 }
 
 
@@ -94,7 +94,7 @@ class OCRApp:
         source_row.pack(fill=tk.X, pady=2)
         ttk.Radiobutton(source_row, text="Monitor", variable=self.source_var, value="monitor").pack(side=tk.LEFT)
         ttk.Radiobutton(source_row, text="SRT", variable=self.source_var, value="srt").pack(side=tk.LEFT, padx=4)
-        ttk.Radiobutton(source_row, text="DeckLink", variable=self.source_var, value="decklink").pack(side=tk.LEFT, padx=4)
+        ttk.Radiobutton(source_row, text="DeckLink (DirectShow)", variable=self.source_var, value="decklink").pack(side=tk.LEFT, padx=4)
 
         monitor_row = ttk.Frame(control_frame)
         monitor_row.pack(fill=tk.X, pady=5)
@@ -110,7 +110,7 @@ class OCRApp:
 
         decklink_row = ttk.Frame(control_frame)
         decklink_row.pack(fill=tk.X, pady=2)
-        ttk.Label(decklink_row, text="DeckLink device:").pack(side=tk.LEFT)
+        ttk.Label(decklink_row, text="DeckLink device (DirectShow):").pack(side=tk.LEFT)
         self.decklink_combo = ttk.Combobox(
             decklink_row, textvariable=self.decklink_device_var, width=22, state="readonly"
         )
@@ -136,7 +136,7 @@ class OCRApp:
         ttk.Entry(decklink_opts, textvariable=self.decklink_size_var, width=9).pack(side=tk.LEFT, padx=2)
         ttk.Label(decklink_opts, text="FPS:").pack(side=tk.LEFT)
         ttk.Entry(decklink_opts, textvariable=self.decklink_fps_var, width=5).pack(side=tk.LEFT, padx=2)
-        ttk.Button(control_frame, text="Kết nối DeckLink", command=self.connect_decklink).pack(fill=tk.X, pady=4)
+        ttk.Button(control_frame, text="Kết nối DeckLink (dshow)", command=self.connect_decklink).pack(fill=tk.X, pady=4)
 
         ttk.Button(control_frame, text="Capture screen", command=self.capture_screen).pack(fill=tk.X, pady=5)
 
@@ -216,7 +216,7 @@ class OCRApp:
             return
         self.decklink_size_var.set(config["size"])
         self.decklink_fps_var.set(config["fps"])
-        self.status_var.set(f"Áp dụng mode {preset} (DeckLink giống OBS)")
+        self.status_var.set(f"Áp dụng mode {preset} (DeckLink DirectShow)")
 
     def capture_screen(self) -> None:
         try:
@@ -478,10 +478,10 @@ class OCRApp:
 
         if self.source_var.get() == "decklink":
             if not self.decklink_capture or not self.decklink_capture.running:
-                raise RuntimeError("Chưa kết nối DeckLink hoặc stream chưa sẵn sàng.")
+                raise RuntimeError("Chưa kết nối DeckLink (DirectShow) hoặc stream chưa sẵn sàng.")
             frame = self.decklink_capture.get_latest_frame()
             if frame is None:
-                raise RuntimeError("Chưa nhận frame từ DeckLink. Kiểm tra thiết bị/độ phân giải.")
+                raise RuntimeError("Chưa nhận frame từ DeckLink (dshow). Kiểm tra thiết bị/độ phân giải.")
             return frame
 
         self.capture_manager.monitor_index = self.monitor_index.get()
@@ -505,19 +505,18 @@ class OCRApp:
         fps = self.decklink_fps_var.get().strip() or "60"
         size = self.decklink_size_var.get().strip() or "1920x1080"
         preset_key = self.decklink_format_var.get()
-        video_format = DECKLINK_PRESETS.get(preset_key, {}).get("format")
 
         if not device:
-            messagebox.showwarning("DeckLink", "Hãy nhập tên thiết bị DeckLink (ví dụ DeckLink Duo (1))")
+            messagebox.showwarning("DeckLink", "Hãy nhập tên thiết bị DeckLink (ví dụ DeckLink Video Capture (1))")
             return
 
         if self.decklink_capture:
             self.decklink_capture.stop()
-        self.decklink_capture = DeckLinkCapture(device=device, video_size=size, fps=fps, video_format=video_format)
+        self.decklink_capture = DirectShowCapture(device=device, video_size=size, fps=fps)
         self.decklink_capture.start()
         self.source_var.set("decklink")
         self._ensure_preview_running()
-        self.status_var.set("Đang kết nối DeckLink... chờ khung hình đầu tiên")
+        self.status_var.set("Đang kết nối DeckLink qua DirectShow... chờ khung hình đầu tiên")
         self._await_decklink_frame()
 
     def _await_decklink_frame(self, retries: int = 30, delay_ms: int = 200) -> None:
@@ -525,19 +524,19 @@ class OCRApp:
             return
 
         if self.decklink_capture.error:
-            self.status_var.set(f"DeckLink lỗi: {self.decklink_capture.error}")
-            messagebox.showerror("DeckLink", f"Không nhận được khung hình: {self.decklink_capture.error}")
+            self.status_var.set(f"DeckLink (dshow) lỗi: {self.decklink_capture.error}")
+            messagebox.showerror("DeckLink", f"Không nhận được khung hình DirectShow: {self.decklink_capture.error}")
             return
 
         frame = self.decklink_capture.get_latest_frame()
         if frame is not None:
             self.image = frame
             self._display_image(frame)
-            self.status_var.set("DeckLink đã lên hình. Vẽ bounding rồi chạy OCR.")
+            self.status_var.set("DeckLink (dshow) đã lên hình. Vẽ bounding rồi chạy OCR.")
             return
 
         if retries <= 0:
-            self.status_var.set("DeckLink chưa có hình. Kiểm tra cáp / định dạng input.")
+            self.status_var.set("DeckLink (dshow) chưa có hình. Kiểm tra cáp / định dạng input.")
             return
 
         self.root.after(delay_ms, lambda: self._await_decklink_frame(retries=retries - 1, delay_ms=delay_ms))
